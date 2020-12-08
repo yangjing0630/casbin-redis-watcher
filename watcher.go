@@ -12,8 +12,8 @@ import (
 
 type Watcher struct {
 	options     WatcherOptions
-	pubConn redis.Client
-	subConn redis.Client
+	pubConn     redis.Client
+	subConn     redis.Client
 	callback    func(string)
 	closed      chan struct{}
 	once        sync.Once
