@@ -3,7 +3,6 @@ package rediswatcher
 import (
 	"fmt"
 	"github.com/casbin/casbin/v2/persist"
-	"reflect"
 	"runtime"
 	"sync"
 
@@ -156,21 +155,22 @@ func (w *Watcher) subscribe() error {
 	defer psc.Unsubscribe()
 	for {
 		receive, err := psc.Receive()
-		fmt.Println(reflect.TypeOf(receive))
-		fmt.Println(err)
-		//switch n := receive.(type) {
-		//
-		//case error:
-		//	return n
-		//case redis.Message:
-		//	if w.callback != nil {
-		//		w.callback(string(n.Data))
-		//	}
-		//case redis.Subscription:
-		//	if n.Count == 0 {
-		//		return nil
-		//	}
-		//}
+		if err != nil {
+			fmt.Printf("try subscribe channel[%s] error[%s]\n", w.options.Channel, err.Error())
+			return nil
+		}
+		switch n := receive.(type) {
+		case error:
+			return n
+		case redis.Message:
+			if w.callback != nil {
+				w.callback("success")
+			}
+		case redis.Subscription:
+			if n.Count == 0 {
+				return nil
+			}
+		}
 	}
 	return nil
 }
