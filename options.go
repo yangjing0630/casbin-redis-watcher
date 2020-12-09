@@ -6,8 +6,8 @@ import (
 
 type WatcherOptions struct {
 	Channel  string
-	PubConn  redis.Client
-	SubConn  redis.Client
+	PubConn  *redis.Client
+	SubConn  *redis.Client
 	Password string
 	Protocol string
 }
@@ -32,13 +32,13 @@ func Protocol(protocol string) WatcherOption {
 	}
 }
 
-func WithRedisSubConnection(connection redis.Client) WatcherOption {
+func WithRedisSubConnection(connection *redis.Client) WatcherOption {
 	return func(options *WatcherOptions) {
 		options.SubConn = connection
 	}
 }
 
-func WithRedisPubConnection(connection redis.Client) WatcherOption {
+func WithRedisPubConnection(connection *redis.Client) WatcherOption {
 	return func(options *WatcherOptions) {
 		options.PubConn = connection
 	}

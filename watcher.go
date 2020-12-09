@@ -11,13 +11,12 @@ import (
 )
 
 type Watcher struct {
-	options     WatcherOptions
-	pubConn     redis.Client
-	subConn     redis.Client
-	callback    func(string)
-	closed      chan struct{}
-	once        sync.Once
-	redisClient *redis.Client
+	options  WatcherOptions
+	pubConn  *redis.Client //生产消息
+	subConn  *redis.Client //订阅消息
+	callback func(string)
+	closed   chan struct{}
+	once     sync.Once
 }
 
 //NewWatcher creates a new Watcher to be used with a Casbin enforcer
@@ -33,7 +32,7 @@ type Watcher struct {
 //c, err := redis.Dial("tcp", ":6379")
 //w, err := rediswatcher.NewWatcher("", rediswatcher.WithRedisConnection(c)
 ////
-func NewWatcher(redisClient *redis.Client) (persist.Watcher, error) {
+func NewWatcher(addr string, setters ...WatcherOption) (persist.Watcher, error) {
 	w := &Watcher{
 		closed: make(chan struct{}),
 	}
@@ -44,6 +43,14 @@ func NewWatcher(redisClient *redis.Client) (persist.Watcher, error) {
 	}
 	// call destructor when the object is released
 	runtime.SetFinalizer(w, finalizer)
+
+	for _, setter := range setters {
+		setter(&w.options)
+	}
+
+	if err := w.connect(addr); err != nil {
+		return nil, err
+	}
 
 	go func() {
 		for {
@@ -72,11 +79,13 @@ func (w *Watcher) SetUpdateCallback(callback func(string)) error {
 // Update publishes a message to all other casbin instances telling them to
 // invoke their update callback
 func (w *Watcher) Update() error {
-	return Publish(w.redisClient, w.options.Channel, "casbin rules updated")
+	if _, err := w.pubConn.Publish(w.options.Channel, "casbin rules updated").Result(); err != nil {
+		return err
+	}
+	return nil
 	//if _, err := w.pubConn.Do("PUBLISH", w.options.Channel, "casbin rules updated").Result(); err != nil {
 	//	return err
 	//}
-	//
 	//return nil
 }
 
@@ -85,16 +94,70 @@ func (w *Watcher) Close() {
 	finalizer(w)
 }
 
-func (w *Watcher) subscribe() error {
-	psc := w.redisClient.Subscribe(w.options.Channel)
-	receive, err := psc.Receive()
-	if err != nil {
+func (w *Watcher) connect(addr string) error {
+	if err := w.connectPub(addr); err != nil {
 		return err
 	}
-	defer psc.Unsubscribe()
 
+	if err := w.connectSub(addr); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (w *Watcher) connectPub(addr string) error {
+	if w.options.PubConn != nil {
+		w.pubConn = w.options.PubConn
+		return nil
+	}
+	client := redis.NewClient(
+		&redis.Options{
+			Addr:     addr,
+			Password: w.options.Password,
+			DB:       0,
+		})
+
+	if _, err := client.Ping().Result(); err != nil {
+		fmt.Printf("connectPub error[%s]\n", err.Error())
+		return err
+	}
+	w.pubConn = client
+	return nil
+}
+
+func (w *Watcher) connectSub(addr string) error {
+	if w.options.SubConn != nil {
+		w.subConn = w.options.SubConn
+		return nil
+	}
+	client := redis.NewClient(
+		&redis.Options{
+			Addr:     addr,
+			Password: w.options.Password,
+			DB:       0,
+		})
+
+	if _, err := client.Ping().Result(); err != nil {
+		fmt.Printf("connectSub error[%s]\n", err.Error())
+		return err
+	}
+
+	w.subConn = client
+	return nil
+}
+
+func (w *Watcher) subscribe() error {
+	psc := w.subConn.Subscribe(w.options.Channel)
+	//if _, err := psc.Receive(); err != nil {
+	//	fmt.Printf("try subscribe channel[%s] error[%s]\n", w.options.Channel, err.Error())
+	//	return nil
+	//}
+	defer psc.Unsubscribe()
 	for {
+		receive, err := psc.Receive()
 		fmt.Println(reflect.TypeOf(receive))
+		fmt.Println(err)
 		//switch n := receive.(type) {
 		//
 		//case error:
@@ -115,21 +178,7 @@ func (w *Watcher) subscribe() error {
 func finalizer(w *Watcher) {
 	w.once.Do(func() {
 		close(w.closed)
-		w.redisClient.Close()
-		//w.subConn.Close()
-		//w.pubConn.Close()
+		w.subConn.Close()
+		w.pubConn.Close()
 	})
-}
-
-func Publish(redisClient *redis.Client, channel string, msg string) error {
-	var err error
-	fmt.Printf("Will publish message [%v] to channel [%v]\n", msg, channel)
-
-	err = redisClient.Publish(channel, msg).Err()
-	if err != nil {
-		fmt.Printf("try publish message to channel[test_channel] error[%s]\n",
-			err.Error())
-		return err
-	}
-	return nil
 }
